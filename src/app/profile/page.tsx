@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { KeyRound, ShieldCheck, LogOut, Info, Share2, Copy, Check } from "lucide-react";
+import { getPrivateKey } from "@/utils/indexedDB";
 
 export default function ProfilePage() {
   const { user, logout, hasLocalPrivateKey } = useAuth();
@@ -12,20 +13,22 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!user) return;
 
-    // Read private key from local storage using current UID
-    const privateKey = localStorage.getItem(`kam_private_key_${user.uid}`);
-    if (privateKey) {
-      try {
-        const parsed = JSON.parse(privateKey);
-        setLocalPrivateKeyJwk(JSON.stringify(parsed, null, 2));
-      } catch (e) {
-        setLocalPrivateKeyJwk(`Error formatting key: ${String(e)}`);
+    const loadKey = async () => {
+      // Read private key from IndexedDB using current UID
+      const privateKey = await getPrivateKey(user.uid);
+      if (privateKey) {
+        try {
+          setLocalPrivateKeyJwk(JSON.stringify(privateKey, null, 2));
+        } catch (e) {
+          setLocalPrivateKeyJwk(`Error formatting key: ${String(e)}`);
+        }
+      } else {
+        setLocalPrivateKeyJwk(
+          "Private Key not found on this browser profile! You cannot decrypt incoming messages unless you import or recover your key."
+        );
       }
-    } else {
-      setLocalPrivateKeyJwk(
-        "Private Key not found on this browser profile! You cannot decrypt incoming messages unless you import or recover your key."
-      );
-    }
+    };
+    loadKey();
   }, [user]);
 
   if (!user) return null;

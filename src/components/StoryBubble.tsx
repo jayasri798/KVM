@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Image from "next/image";
 
 interface StoryBubbleProps {
   displayName: string;
@@ -34,12 +35,13 @@ export default function StoryBubble({
               : "bg-slate-200 group-hover:bg-slate-300"
             }`}
         >
-          <div className="w-full h-full rounded-full border-2 border-white overflow-hidden bg-slate-50">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+          <div className="w-full h-full rounded-full border-2 border-white overflow-hidden bg-slate-50 relative">
+            <Image
               src={avatarUrl}
               alt={displayName}
-              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+              fill
+              sizes="60px"
+              className="object-cover transition-transform duration-500 group-hover:scale-105"
             />
           </div>
         </div>

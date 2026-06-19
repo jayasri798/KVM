@@ -21,6 +21,7 @@ import {
   getSimConnections,
   saveSimConnection,
   deleteSimConnection,
+  saveSimConversation,
 } from "@/lib/simulator";
 
 interface SearchUser {
@@ -199,6 +200,15 @@ export default function SearchPage() {
           status: "ACCEPTED",
           updatedAt: new Date().toISOString(),
         });
+
+        // Initialize simulated conversation metadata doc
+        const participants = [match.senderUid, match.receiverUid];
+        saveSimConversation({
+          id: connId,
+          participants,
+          createdAt: new Date().toISOString(),
+          status: "ACTIVE",
+        });
       }
       setSubmittingId(null);
       return;
@@ -209,6 +219,15 @@ export default function SearchPage() {
       await updateDoc(doc(db, "connections", connId), {
         status: "ACCEPTED",
         updatedAt: serverTimestamp(),
+      });
+
+      // Initialize real Firestore conversation metadata doc
+      const [uidA, uidB] = connId.split("_");
+      await setDoc(doc(db, "conversations", connId), {
+        id: connId,
+        participants: [uidA, uidB],
+        createdAt: serverTimestamp(),
+        status: "ACTIVE",
       });
     } catch (e) {
       console.error(e);

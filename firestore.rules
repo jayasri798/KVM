@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: Checks if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: Gets connection ID deterministically between two users
+    function getConnection(uidA, uidB) {
+      let sortedId = uidA < uidB ? uidA + "_" + uidB : uidB + "_" + uidA;
+      return get(/databases/$(database)/documents/connections/$(sortedId)).data;
+    }
+
+    // Helper: Checks if there is an accepted connection between two participants
+    function hasAcceptedConnection(uidA, uidB) {
+      let conn = getConnection(uidA, uidB);
+      return conn != null && conn.status == "ACCEPTED";
+    }
+
+    // Rules for Users collection
+    match /users/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Rules for Connections collection
+    match /connections/{connectionId} {
+      allow read, write: if isAuthenticated() && (
+        request.auth.uid == resource.data.senderUid || 
+        request.auth.uid == resource.data.receiverUid ||
+        request.auth.uid == request.resource.data.senderUid ||
+        request.auth.uid == request.resource.data.receiverUid
+      );
+    }
+
+    // Rules for Conversations collection (Security Rules Upgrade)
+    match /conversations/{conversationId} {
+      allow read, write: if isAuthenticated() && 
+        request.auth.uid in resource.data.participants &&
+        hasAcceptedConnection(resource.data.participants[0], resource.data.participants[1]);
+        
+      // Nested messages subcollection rules
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated() && 
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants &&
+          hasAcceptedConnection(
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants[0],
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants[1]
+          );
+      }
+    }
+    
+    // Legacy room message structure (/chats/{chatId}/messages/{msgId})
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated();
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+  }
+}

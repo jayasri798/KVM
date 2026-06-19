@@ -103,3 +103,25 @@ export function saveSimMessage(chatId: string, msg: SimMessage) {
   // Broadcast custom event so other components know a new message was written
   window.dispatchEvent(new CustomEvent("kam_sim_new_message", { detail: { chatId } }));
 }
+
+export interface SimConversation {
+  id: string;
+  participants: string[];
+  createdAt: string;
+  status: "ACTIVE";
+}
+
+export function getSimConversations(): SimConversation[] {
+  if (typeof window === "undefined") return [];
+  const stored = localStorage.getItem("kam_sim_conversations");
+  return stored ? JSON.parse(stored) : [];
+}
+
+export function saveSimConversation(conv: SimConversation) {
+  const convs = getSimConversations();
+  const filtered = convs.filter((c) => c.id !== conv.id);
+  filtered.push(conv);
+  localStorage.setItem("kam_sim_conversations", JSON.stringify(filtered));
+  window.dispatchEvent(new Event("kam_sim_db_update"));
+}
+

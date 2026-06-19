@@ -4,6 +4,7 @@ import React, { useState, useRef } from "react";
 import { Heart, MessageCircle, Send, MoreHorizontal } from "lucide-react";
 import { Post } from "../utils/mockData";
 import { motion, AnimatePresence } from "framer-motion";
+import Image from "next/image";
 
 interface PostCardProps {
   post: Post;
@@ -51,12 +52,15 @@ export default function PostCard({ post, currentUsername, onLike, onAddComment }
       {/* Top Row: 40px circle avatar, Username (Bold), subtle (...) menu icon */}
       <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-white">
         <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={post.userAvatar}
-            alt={post.username}
-            className="w-10 h-10 rounded-full object-cover border border-slate-200"
-          />
+          <div className="relative w-10 h-10 rounded-full overflow-hidden border border-slate-200">
+            <Image
+              src={post.userAvatar}
+              alt={post.username}
+              fill
+              sizes="40px"
+              className="object-cover"
+            />
+          </div>
           <div>
             <span className="font-bold text-sm text-slate-800 hover:text-emerald-600 cursor-pointer transition-colors block">
               {post.username}
@@ -75,12 +79,15 @@ export default function PostCard({ post, currentUsername, onLike, onAddComment }
         onClick={handleDoubleTap}
       >
         <div className="w-full h-full rounded-[4px] overflow-hidden border border-slate-100">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Image
             src={post.imageUrl}
             alt="Post content"
-            className="w-full h-full object-cover transition-transform duration-700 hover:scale-103"
-            loading="lazy"
+            fill
+            sizes="(max-width: 512px) 100vw, 512px"
+            className="object-cover transition-transform duration-700 hover:scale-103"
+            priority={post.id === "post-1"}
+            placeholder="blur"
+            blurDataURL="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNmMWY1ZjkiLz48L3N2Zz4="
           />
         </div>
 
@@ -190,12 +197,15 @@ export default function PostCard({ post, currentUsername, onLike, onAddComment }
                 {post.comments.length > 0 ? (
                   post.comments.map((comment) => (
                     <div key={comment.id} className="flex gap-3 text-xs">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={comment.userAvatar}
-                        alt={comment.username}
-                        className="w-8 h-8 rounded-full object-cover border border-slate-200 mt-0.5"
-                      />
+                      <div className="relative w-8 h-8 rounded-full overflow-hidden border border-slate-200 mt-0.5">
+                        <Image
+                          src={comment.userAvatar}
+                          alt={comment.username}
+                          fill
+                          sizes="32px"
+                          className="object-cover"
+                        />
+                      </div>
                       <div className="flex-1 space-y-1">
                         <div className="flex items-baseline gap-2">
                           <span className="font-extrabold text-slate-900">{comment.username}</span>

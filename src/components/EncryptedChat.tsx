@@ -14,14 +14,18 @@ import {
   onSnapshot,
   serverTimestamp,
   where,
+  updateDoc,
+  setDoc,
 } from "firebase/firestore";
 import {
   getSimUsers,
   getSimConnections,
   getSimMessages,
   saveSimMessage,
+  saveSimUser,
 } from "@/lib/simulator";
-import { encryptMessage, decryptMessage, EncryptedPayload } from "@/utils/crypto";
+import { encryptMessage, decryptMessage, EncryptedPayload, generateE2EKeyPair, exportKeyPairToJwk } from "@/utils/crypto";
+import { getPrivateKey, savePrivateKey } from "@/utils/indexedDB";
 
 interface ChatPartner {
   uid: string;
@@ -60,6 +64,7 @@ export default function EncryptedChat() {
   const [decryptedCache, setDecryptedCache] = useState<Record<string, string>>({});
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
+  const [keyError, setKeyError] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const getChatId = (partnerUid: string) => {
@@ -177,59 +182,73 @@ export default function EncryptedChat() {
     }
 
     const chatId = getChatId(activePartner.uid);
-    const privateKeyJwkJson = localStorage.getItem(`kam_private_key_${user.uid}`);
-    if (!privateKeyJwkJson) return;
-    const privateKeyJwk = JSON.parse(privateKeyJwkJson);
+    let active = true;
 
     const processAndDecryptMessages = async (rawMsgs: FirestoreMessage[]) => {
-      const decryptedList: DecryptedMessage[] = await Promise.all(
-        rawMsgs.map(async (msg) => {
-          let parsedPayload = { wrappedKey: "", iv: "", ciphertext: "", aesKeyHex: "" };
-          try {
-            parsedPayload = JSON.parse(msg.encryptedPayload);
-          } catch (e) {
-            console.error("Payload parse error:", e);
-          }
+      try {
+        const privateKeyJwk = await getPrivateKey(user.uid);
+        if (!privateKeyJwk) {
+          setKeyError(true);
+          return;
+        } else {
+          setKeyError(false);
+        }
 
-          let plaintext = decryptedCache[msg.id] || "";
+        const decryptedList: DecryptedMessage[] = await Promise.all(
+          rawMsgs.map(async (msg) => {
+            let parsedPayload = { wrappedKey: "", iv: "", ciphertext: "", aesKeyHex: "" };
+            try {
+              parsedPayload = JSON.parse(msg.encryptedPayload);
+            } catch (e) {
+              console.error("Payload parse error:", e);
+            }
 
-          if (!plaintext) {
-            if (msg.senderId === user.uid) {
-              plaintext = "Plaintext Sent";
-            } else {
-              try {
-                plaintext = await decryptMessage(parsedPayload, privateKeyJwk);
-                setDecryptedCache((prev) => ({ ...prev, [msg.id]: plaintext }));
-              } catch (err) {
-                console.error("Decryption error:", err);
-                plaintext = "🔑 Decryption error (Keys mismatch)";
+            let plaintext = decryptedCache[msg.id] || "";
+
+            if (!plaintext) {
+              if (msg.senderId === user.uid) {
+                plaintext = "Plaintext Sent";
+              } else {
+                try {
+                  plaintext = await decryptMessage(parsedPayload, privateKeyJwk);
+                  setDecryptedCache((prev) => ({ ...prev, [msg.id]: plaintext }));
+                } catch (err) {
+                  console.error("Decryption error:", err);
+                  plaintext = "🔑 Decryption error (Keys mismatch)";
+                }
               }
             }
-          }
 
-          let time = "Just now";
-          if (msg.timestamp) {
-            if (typeof msg.timestamp === "string") {
-              time = new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-            } else if (msg.timestamp.toDate) {
-              time = msg.timestamp.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            let time = "Just now";
+            if (msg.timestamp) {
+              if (typeof msg.timestamp === "string") {
+                time = new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              } else if (msg.timestamp.toDate) {
+                time = msg.timestamp.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              }
             }
-          }
 
-          return {
-            id: msg.id,
-            senderId: msg.senderId,
-            receiverId: msg.receiverId,
-            plaintext,
-            wrappedKey: parsedPayload.wrappedKey,
-            iv: parsedPayload.iv,
-            ciphertext: parsedPayload.ciphertext,
-            aesKeyHex: parsedPayload.aesKeyHex || "",
-            timestampStr: time,
-          };
-        })
-      );
-      setDecryptedMessages(decryptedList);
+            return {
+              id: msg.id,
+              senderId: msg.senderId,
+              receiverId: msg.receiverId,
+              plaintext,
+              wrappedKey: parsedPayload.wrappedKey,
+              iv: parsedPayload.iv,
+              ciphertext: parsedPayload.ciphertext,
+              aesKeyHex: parsedPayload.aesKeyHex || "",
+              timestampStr: time,
+            };
+          })
+        );
+
+        if (active) {
+          setDecryptedMessages(decryptedList);
+        }
+      } catch (err) {
+        console.error("Fault Tolerance boundary - decryption loop crash caught:", err);
+        setKeyError(true);
+      }
     };
 
     if (isSimulated) {
@@ -257,6 +276,7 @@ export default function EncryptedChat() {
       window.addEventListener("kam_sim_db_update", loadSimMessages);
 
       return () => {
+        active = false;
         window.removeEventListener("kam_sim_new_message", handleNewSimMessage);
         window.removeEventListener("kam_sim_db_update", loadSimMessages);
       };
@@ -283,12 +303,15 @@ export default function EncryptedChat() {
       processAndDecryptMessages(list);
     });
 
-    return () => unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [activePartner, user]);
 
   // 3. Encrypt message in real-time as user types
   useEffect(() => {
-    if (!inputText.trim() || !activePartner) {
+    if (!inputText.trim() || !activePartner || keyError) {
       setDraftPayload(null);
       return;
     }
@@ -303,16 +326,53 @@ export default function EncryptedChat() {
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [inputText, activePartner]);
+  }, [inputText, activePartner, keyError]);
 
   // 4. Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [decryptedMessages, activePartner]);
 
+  // Key recovery handler
+  const handleRegenerateKeys = async () => {
+    if (!user) return;
+    try {
+      const keyPair = await generateE2EKeyPair();
+      const jwks = await exportKeyPairToJwk(keyPair);
+
+      // Save new private key to IndexedDB
+      await savePrivateKey(user.uid, jwks.privateKey);
+
+      // Register new public key
+      if (isSimulated) {
+        const usersList = getSimUsers();
+        const match = usersList.find((u) => u.uid === user.uid);
+        if (match) {
+          saveSimUser({
+            ...match,
+            publicKey: JSON.stringify(jwks.publicKey),
+          });
+        }
+      } else {
+        if (db) {
+          await updateDoc(doc(db, "users", user.uid), {
+            publicKey: JSON.stringify(jwks.publicKey),
+          });
+        }
+      }
+
+      setKeyError(false);
+      alert("Cryptographic Vault successfully synchronized and restored!");
+      window.location.reload();
+    } catch (e) {
+      console.error("Failed to recover key boundary:", e);
+      alert("Failed to restore secure keys.");
+    }
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !activePartner || !user) return;
+    if (!inputText.trim() || !activePartner || !user || keyError) return;
 
     try {
       const payload = await encryptMessage(inputText.trim(), activePartner.publicKeyJwk);
@@ -474,6 +534,22 @@ export default function EncryptedChat() {
               </div>
             </div>
 
+            {/* Error Fallback Banner */}
+            {keyError && (
+              <div className="bg-rose-50 border-b border-rose-200 py-3 px-5 text-xs text-rose-800 font-bold flex items-center justify-between select-none">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                  <span>Security Key Out of Sync - Re-verify Device</span>
+                </div>
+                <button
+                  onClick={handleRegenerateKeys}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-extrabold text-[10px] cursor-pointer"
+                >
+                  Generate New Keys
+                </button>
+              </div>
+            )}
+
             {/* Chat History Thread */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50/40">
               {decryptedMessages.length > 0 ? (
@@ -593,14 +669,15 @@ export default function EncryptedChat() {
             >
               <input
                 type="text"
-                placeholder={`Type secure message to @${activePartner.displayName}...`}
+                placeholder={keyError ? "Regenerate keys above to restore messaging..." : `Type secure message to @${activePartner.displayName}...`}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all shadow-inner"
+                disabled={keyError}
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all shadow-inner disabled:opacity-50"
               />
               <button
                 type="submit"
-                disabled={!inputText.trim()}
+                disabled={!inputText.trim() || keyError}
                 className="px-5 py-3 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/40 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-emerald-500/10 active:scale-[0.98]"
               >
                 <span>Send</span>

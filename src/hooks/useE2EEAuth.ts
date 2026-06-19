@@ -6,6 +6,7 @@ import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } fr
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { generateE2EKeyPair, exportKeyPairToJwk } from "@/utils/crypto";
 import { saveSimUser, getSimUsers, SimUser } from "@/lib/simulator";
+import { getPrivateKey, savePrivateKey } from "@/utils/indexedDB";
 
 export interface E2EUser {
   uid: string;
@@ -50,8 +51,8 @@ export function useE2EEAuth() {
           const keyPair = await generateE2EKeyPair();
           const jwks = await exportKeyPairToJwk(keyPair);
 
-          // Save Private key locally
-          localStorage.setItem(`kam_private_key_${uid}`, JSON.stringify(jwks.privateKey));
+          // Save Private key locally (IndexedDB V2)
+          await savePrivateKey(uid, jwks.privateKey);
           setHasLocalPrivateKey(true);
           publicKeyJwk = jwks.publicKey;
 
@@ -69,7 +70,7 @@ export function useE2EEAuth() {
         } else {
           // Returning User
           publicKeyJwk = JSON.parse(existing.publicKey);
-          const storedPrivateKey = localStorage.getItem(`kam_private_key_${uid}`);
+          const storedPrivateKey = await getPrivateKey(uid);
           if (!storedPrivateKey) {
             setHasLocalPrivateKey(false);
           } else {
@@ -142,7 +143,7 @@ export function useE2EEAuth() {
         const keyPair = await generateE2EKeyPair();
         const jwks = await exportKeyPairToJwk(keyPair);
 
-        localStorage.setItem(`kam_private_key_${fbUser.uid}`, JSON.stringify(jwks.privateKey));
+        await savePrivateKey(fbUser.uid, jwks.privateKey);
         setHasLocalPrivateKey(true);
 
         publicKeyJwk = jwks.publicKey;
@@ -159,7 +160,7 @@ export function useE2EEAuth() {
         const data = userSnap.data();
         publicKeyJwk = JSON.parse(data.publicKey);
 
-        const storedPrivateKey = localStorage.getItem(`kam_private_key_${fbUser.uid}`);
+        const storedPrivateKey = await getPrivateKey(fbUser.uid);
         if (!storedPrivateKey) {
           setHasLocalPrivateKey(false);
         } else {
@@ -181,38 +182,46 @@ export function useE2EEAuth() {
 
   // Listen for Auth status changes (Supports both modes)
   useEffect(() => {
-    if (isSimulated) {
-      const stored = localStorage.getItem("kam_sim_auth_user");
-      if (stored) {
-        try {
-          const parsed: E2EUser = JSON.parse(stored);
-          const storedPrivateKey = localStorage.getItem(`kam_private_key_${parsed.uid}`);
-          setHasLocalPrivateKey(!!storedPrivateKey);
-          setUser(parsed);
-        } catch (e) {
-          console.error("Failed to load simulated session:", e);
+    let unsub: (() => void) | undefined;
+
+    const initAuth = async () => {
+      if (isSimulated) {
+        const stored = localStorage.getItem("kam_sim_auth_user");
+        if (stored) {
+          try {
+            const parsed: E2EUser = JSON.parse(stored);
+            const storedPrivateKey = await getPrivateKey(parsed.uid);
+            setHasLocalPrivateKey(!!storedPrivateKey);
+            setUser(parsed);
+          } catch (e) {
+            console.error("Failed to load simulated session:", e);
+          }
         }
+        setLoading(false);
+        return;
       }
-      setLoading(false);
-      return;
-    }
 
-    if (!auth) {
-      setLoading(false);
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      if (fbUser) {
-        await handleUserSync(fbUser);
-      } else {
-        setUser(null);
-        setHasLocalPrivateKey(true);
+      if (!auth) {
+        setLoading(false);
+        return;
       }
-      setLoading(false);
-    });
 
-    return () => unsubscribe();
+      unsub = onAuthStateChanged(auth, async (fbUser) => {
+        if (fbUser) {
+          await handleUserSync(fbUser);
+        } else {
+          setUser(null);
+          setHasLocalPrivateKey(true);
+        }
+        setLoading(false);
+      });
+    };
+
+    initAuth();
+
+    return () => {
+      if (unsub) unsub();
+    };
   }, []);
 
   return {
