@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0d0d0f;
-  --foreground: #f4f4f5;
-  --card-bg: #151518;
-  --card-border: #232329;
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
   --mint: #10b981;
-  --mint-hover: #34d399;
-  --mint-light: rgba(16, 185, 129, 0.1);
-  --muted: #8e8e93;
+  --mint-hover: #059669;
+  --mint-light: rgba(16, 185, 129, 0.08);
+  --muted: #64748b;
 }
 
 @theme inline {
@@ -70,4 +70,9 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
 }
+
+.contain-paint {
+  contain: paint;
+}
+
 
