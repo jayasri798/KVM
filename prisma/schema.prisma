@@ -1,0 +1,50 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  displayName  String
+  avatarUrl    String
+  passwordHash String
+  publicKey    String    // Stores the client-generated Public Key (JWK JSON String)
+  createdAt    DateTime  @default(now())
+  
+  posts        Post[]
+  sentMessages Message[] @relation("SentMessages")
+  recvMessages Message[] @relation("ReceivedMessages")
+}
+
+model Post {
+  id        String   @id @default(uuid())
+  userId    String
+  mediaUrl  String
+  caption   String
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Message {
+  id               String   @id @default(uuid())
+  senderId         String
+  receiverId       String
+  encryptedContent String   // Serialized JSON string of the E2EE package: {wrappedKey, iv, ciphertext, aesKeyHex}
+  isRead           Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  
+  sender           User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver         User     @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, receiverId])
+  @@index([createdAt])
+}
